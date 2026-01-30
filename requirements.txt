@@ -1,4 +1,5 @@
 discord.py
-duckduckgo-search==6.1.0
+aiohttp
 flask
+
 
