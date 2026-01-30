@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import Button, View
+from discord.ui import Button, View # Importação necessária para botões
 import aiohttp
 import json
 import random
@@ -11,22 +11,21 @@ import keep_alive
 TOKEN = os.environ['DISCORD_TOKEN']
 HISTORICO_FILE = "historico_focas.json"
 
-# --- LISTA FILTRADA (Só as melhores) ---
-# Focada em: Bebês peludos, Gelo, Focas Gordas e Memes
+# --- LISTA DE TERMOS FILTRADA (Só Fofura/Gelo/Memes) ---
 TERMOS_TOP_TIER = [
-    "Harp seal pup",        # A clássica foca branca peluda bebê
+    "Harp seal pup",        # Bebê foca (aquelas brancas de pelo)
     "Baby seal ice",        # Bebê no gelo
     "Funny seal face",      # Cara engraçada
     "Laughing seal",        # Foca rindo
     "Chubby seal",          # Foca gorda/redonda
-    "Weddell seal",         # Aquela foca gordinha que parece sorrir
+    "Weddell seal",         # Foca sorridente
     "Seal rolling",         # Foca rolando
     "Silly seal",           # Foca boba
-    "Pusa hispida",         # Foca anelada (muito fofa)
+    "Pusa hispida",         # Foca anelada
     "Spotted seal pup"      # Filhote manchado
 ]
 
-# --- LISTA DE BACKUP (Garantia de Fofura HD) ---
+# --- BACKUP DE EMERGÊNCIA (Links diretos HD) ---
 BACKUP_FOCAS = [
     "https://upload.wikimedia.org/wikipedia/commons/2/25/Saimaa_Ringed_Seal_Phoca_hispida_saimensis.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Weddell_Seal.jpg/1024px-Weddell_Seal.jpg",
@@ -40,30 +39,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- SISTEMA DE BOTÕES (A Novidade) ---
-
-class BotaoFocaView(View):
-    def __init__(self):
-        super().__init__(timeout=None) # O botão não expira
-
-    @discord.ui.button(label="Mais uma!", style=discord.ButtonStyle.primary, emoji="🔄")
-    async def botao_callback(self, interaction: discord.Interaction, button: Button):
-        # Avisa o Discord que recebemos o clique e vamos processar (para não dar erro de falha)
-        await interaction.response.defer()
-        
-        # Busca uma nova foca
-        nova_imagem = await buscar_foca_wikipedia()
-        
-        # Se falhar, usa backup
-        if nova_imagem is None:
-            nova_imagem = random.choice(BACKUP_FOCAS)
-            
-        salvar_historico(nova_imagem)
-        
-        # Envia a nova imagem COM o botão novamente (loop infinito de botões)
-        await interaction.followup.send(content=nova_imagem, view=BotaoFocaView())
-
-# --- FUNÇÕES DE LÓGICA ---
+# --- FUNÇÕES DE LÓGICA (Busca e Histórico) ---
 
 def carregar_historico():
     if not os.path.exists(HISTORICO_FILE):
@@ -85,11 +61,11 @@ def salvar_historico(link):
 async def buscar_foca_wikipedia():
     links_usados = carregar_historico()
     termo = random.choice(TERMOS_TOP_TIER)
-    offset = random.randint(0, 15) # Offset curto para garantir imagens boas do topo
+    # Offset baixo (0-20) garante que pegamos as imagens mais relevantes do topo
+    offset = random.randint(0, 20)
     
-    print(f"Buscando: {termo}")
-
-    headers = {'User-Agent': 'FocaBotEducation/3.0'}
+    # Identificação do bot para a Wikipédia não bloquear
+    headers = {'User-Agent': 'FocaBotEducation/4.0 (Discord Bot; contato@seuserver.com)'}
     
     url = (
         f"https://commons.wikimedia.org/w/api.php?"
@@ -120,16 +96,39 @@ async def buscar_foca_wikipedia():
                 for img in imagens:
                     if img not in links_usados:
                         return img
-                return imagens[0] # Retorna a primeira se tudo for repetido
+                return imagens[0]
                 
-        except Exception:
+        except Exception as e:
+            print(f"Erro na busca: {e}")
             return None
+
+# --- A CLASSE DO BOTÃO (Aqui acontece a mágica) ---
+
+class BotaoFocaView(View):
+    def __init__(self):
+        super().__init__(timeout=None) # O botão não expira
+
+    @discord.ui.button(label="Mais uma!", style=discord.ButtonStyle.primary, emoji="🔄")
+    async def botao_callback(self, interaction: discord.Interaction, button: Button):
+        # 1. Avisa o discord que recebemos o clique (para não dar 'Interação falhou')
+        await interaction.response.defer()
+        
+        # 2. Busca nova imagem
+        nova_imagem = await buscar_foca_wikipedia()
+        if nova_imagem is None:
+            nova_imagem = random.choice(BACKUP_FOCAS)
+            
+        salvar_historico(nova_imagem)
+        
+        # 3. Manda uma NOVA mensagem com a imagem e UM NOVO BOTÃO
+        # Assim cria-se um ciclo infinito de botões
+        await interaction.followup.send(content=nova_imagem, view=BotaoFocaView())
 
 # --- COMANDOS ---
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} está pronto com botões!')
+    print(f'Bot {bot.user} está pronto com sistema de botões v2!')
 
 @bot.command()
 async def foca(ctx):
@@ -141,7 +140,7 @@ async def foca(ctx):
 
         salvar_historico(imagem_url)
         
-        # Aqui enviamos a imagem junto com a View (o botão)
+        # Envia a mensagem acoplando a View (o botão)
         await ctx.send(content=imagem_url, view=BotaoFocaView())
 
 # --- INICIALIZAÇÃO ---
