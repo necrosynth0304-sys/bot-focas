@@ -1,21 +1,14 @@
 import discord
 from discord.ext import commands
+import aiohttp
 import json
 import random
 import os
-import asyncio
-from duckduckgo_search import AsyncDDGS # A nova biblioteca de busca
 import keep_alive
 
 # --- CONFIGURAÇÃO ---
 TOKEN = os.environ['DISCORD_TOKEN']
 HISTORICO_FILE = "historico_focas.json"
-
-# Termos de busca para variar as imagens (para não vir sempre as mesmas)
-TERMOS_BUSCA = [
-    "cute seal", "foca fofa", "baby seal", "funny seal", 
-    "seal meme", "foca engraçada", "seal face", "harp seal"
-]
 
 # Configuração dos Intents
 intents = discord.Intents.default()
@@ -36,67 +29,62 @@ def carregar_historico():
 def salvar_historico(link):
     historico = carregar_historico()
     historico.append(link)
-    # Mantém o histórico com no máximo 500 links para não ficar gigante
+    # Mantém o histórico limpo (últimas 500)
     if len(historico) > 500:
         historico.pop(0) 
     with open(HISTORICO_FILE, "w") as f:
         json.dump(historico, f)
 
-async def buscar_foca_web():
+async def buscar_foca_blindada():
     """
-    Usa o DuckDuckGo para buscar imagens de focas na web.
+    Usa o LoremFlickr para pegar imagens sem levar bloqueio.
     """
     links_usados = carregar_historico()
-    termo = random.choice(TERMOS_BUSCA) # Escolhe um termo aleatório
-
-    print(f"Buscando na web por: {termo}...")
     
-    try:
-        # Busca 20 imagens sobre o termo
-        results = await AsyncDDGS().images(termo, region="wt-wt", safesearch="off", max_results=20)
-        
-        # O DuckDuckGo retorna uma lista de dicionários. Queremos só a URL da imagem.
-        imagens_candidatas = [r['image'] for r in results]
-        
-        random.shuffle(imagens_candidatas)
+    # Gera um número aleatório para "forçar" o site a dar uma imagem nova
+    seed = random.randint(1, 9999999)
+    
+    # URL Mágica: Pede uma imagem de foca (seal) de 800x600 pixels
+    # O parametro ?lock= ajuda a variar a imagem
+    url_base = f"https://loremflickr.com/800/600/seal?lock={seed}"
 
-        for imagem in imagens_candidatas:
-            if imagem not in links_usados:
-                return imagem
-        
-        return "REPETIDO" # Se todas as 20 já foram usadas (raro)
-
-    except Exception as e:
-        print(f"Erro na busca: {e}")
-        return None
+    async with aiohttp.ClientSession() as session:
+        # allow_redirects=True é o segredo. O site redireciona para a foto real (jpg)
+        async with session.get(url_base, allow_redirects=True) as resp:
+            if resp.status == 200:
+                # Pegamos o link final da imagem (ex: flickr.com/foto123.jpg)
+                url_final = str(resp.url)
+                
+                # Se por um acaso cair uma repetida, avisamos o bot
+                if url_final in links_usados:
+                    return "REPETIDO"
+                
+                return url_final
+            else:
+                return None
 
 # --- COMANDOS ---
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} está online e buscando na Web!')
+    print(f'Bot {bot.user} está online e pronto!')
 
 @bot.command()
 async def foca(ctx):
     async with ctx.typing():
-        imagem_url = await buscar_foca_web()
+        # Tenta pegar a imagem
+        imagem_url = await buscar_foca_blindada()
 
-        if imagem_url is None:
-            await ctx.send("Minhas buscas falharam... O DuckDuckGo não respondeu.")
+        # Lógica de tentativa (se der repetido, tenta mais uma vez na hora)
+        if imagem_url == "REPETIDO":
+            imagem_url = await buscar_foca_blindada()
         
-        elif imagem_url == "REPETIDO":
-            # Se deu azar de pegar só repetida, tenta de novo automaticamente (recursão simples)
-            imagem_url = await buscar_foca_web() 
-            if imagem_url and imagem_url != "REPETIDO":
-                 await ctx.send(imagem_url)
-                 salvar_historico(imagem_url)
-            else:
-                 await ctx.send("Estou vendo muitas focas repetidas, tente de novo em alguns segundos!")
-        
-        else:
+        if imagem_url and imagem_url != "REPETIDO":
             await ctx.send(imagem_url)
             salvar_historico(imagem_url)
             print(f"Enviada: {imagem_url}")
+        else:
+            await ctx.send("As focas estão tímidas... Tente novamente em alguns segundos!")
 
 # --- INICIALIZAÇÃO ---
 keep_alive.keep_alive()
