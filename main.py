@@ -5,6 +5,7 @@ import aiohttp
 import json
 import random
 import os
+import io # Necessário para lidar com o arquivo da imagem
 import keep_alive
 
 # --- CONFIGURAÇÃO ---
@@ -63,18 +64,15 @@ async def buscar_foca_wikipedia():
     termo = random.choice(TERMOS_FOFOS)
     offset = random.randint(0, 15)
     
-    headers = {'User-Agent': 'FocaBotEducation/7.0'}
+    headers = {'User-Agent': 'FocaBotEducation/8.0'}
     
-    # MUDANÇA CRUCIAL AQUI: &iiurlwidth=800
-    # Isso pede para a Wiki entregar uma versão .JPG de 800px, perfeita para o Discord
+    # Pede a imagem já redimensionada (800px) para ser mais rápido o download
     url = (
         f"https://commons.wikimedia.org/w/api.php?"
         f"action=query&generator=search&gsrsearch={termo} filetype:bitmap"
         f"&gsrnamespace=6&gsrlimit=30&gsroffset={offset}&format=json"
         f"&prop=imageinfo&iiprop=url&iiurlwidth=800"
     )
-
-    print(f"Buscando: {termo} (Solicitando Thumbnail)")
 
     async with aiohttp.ClientSession() as session:
         try:
@@ -89,8 +87,7 @@ async def buscar_foca_wikipedia():
                 
                 for pid in pages:
                     info = pages[pid].get("imageinfo", [{}])[0]
-                    
-                    # Prioriza a 'thumburl' (versão leve) se existir, senão pega a 'url' original
+                    # Pega a versão thumb (leve)
                     url_img = info.get("thumburl", info.get("url"))
                     
                     if url_img and eh_imagem_segura(url_img) and url_img not in links_usados:
@@ -99,17 +96,47 @@ async def buscar_foca_wikipedia():
                 if not imagens_candidatas: return None
                 return random.choice(imagens_candidatas)
         except Exception as e:
-            print(f"Erro: {e}")
+            print(f"Erro busca: {e}")
             return None
 
-# --- CRIAÇÃO DO EMBED ---
-def criar_embed(url_imagem):
-    embed = discord.Embed(title="🦭 Aqui está sua foca!", color=0x3498db)
-    embed.set_image(url=url_imagem)
-    embed.set_footer(text="Imagem gerada via Wikimedia Commons")
-    return embed
+async def enviar_foca_com_upload(destination, view=None):
+    """
+    Função mágica que baixa a imagem e faz upload para o Discord.
+    Serve tanto para o comando !foca quanto para o botão.
+    """
+    imagem_url = await buscar_foca_wikipedia()
+    
+    # Lógica de tentativas
+    if imagem_url is None: imagem_url = await buscar_foca_wikipedia()
+    if imagem_url is None: imagem_url = random.choice(BACKUP_FOCAS)
+    
+    salvar_historico(imagem_url)
+    
+    # Tenta baixar a imagem
+    async with aiohttp.ClientSession() as session:
+        async with session.get(imagem_url) as resp:
+            if resp.status == 200:
+                # Lê os dados da imagem na memória
+                data = await resp.read()
+                arquivo_imagem = io.BytesIO(data)
+                
+                # Cria o arquivo para o Discord
+                arquivo = discord.File(arquivo_imagem, filename="foca.jpg")
+                
+                # Cria o Embed e "aponta" para o arquivo que acabamos de criar
+                embed = discord.Embed(title="🦭 Aqui está sua foca!", color=0x3498db)
+                embed.set_image(url="attachment://foca.jpg") # Segredo: attachment://
+                embed.set_footer(text="Imagem enviada via Upload Seguro")
+                
+                # Envia tudo junto: Embed + Arquivo + Botão
+                if view:
+                    await destination.send(file=arquivo, embed=embed, view=view)
+                else:
+                    await destination.send(file=arquivo, embed=embed)
+            else:
+                await destination.send("Falha ao baixar a foca :(", view=view)
 
-# --- BOTÕES E COMANDOS ---
+# --- BOTÕES ---
 
 class BotaoFocaView(View):
     def __init__(self):
@@ -117,36 +144,22 @@ class BotaoFocaView(View):
 
     @discord.ui.button(label="Mais uma!", style=discord.ButtonStyle.primary, emoji="🔄")
     async def botao_callback(self, interaction: discord.Interaction, button: Button):
+        # Defere a interação para ganhar tempo de download
         await interaction.response.defer()
-        
-        nova_imagem = None
-        for _ in range(3):
-            nova_imagem = await buscar_foca_wikipedia()
-            if nova_imagem: break
-            
-        if nova_imagem is None: nova_imagem = random.choice(BACKUP_FOCAS)
-            
-        salvar_historico(nova_imagem)
-        embed_novo = criar_embed(nova_imagem)
-        
-        await interaction.followup.send(embed=embed_novo, view=BotaoFocaView())
+        # Usa interaction.followup para enviar a nova mensagem
+        await enviar_foca_com_upload(interaction.followup, BotaoFocaView())
+
+# --- COMANDOS ---
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} online com FIX DE IMAGEM!')
+    print(f'Bot {bot.user} online! MODO UPLOAD ATIVADO.')
 
 @bot.command()
 async def foca(ctx):
     async with ctx.typing():
-        imagem_url = await buscar_foca_wikipedia()
-        
-        if imagem_url is None: imagem_url = await buscar_foca_wikipedia()
-        if imagem_url is None: imagem_url = random.choice(BACKUP_FOCAS)
-
-        salvar_historico(imagem_url)
-        embed_inicial = criar_embed(imagem_url)
-        
-        await ctx.send(embed=embed_inicial, view=BotaoFocaView())
+        # Usa a mesma função de upload para o comando
+        await enviar_foca_com_upload(ctx, BotaoFocaView())
 
 keep_alive.keep_alive()
 bot.run(TOKEN)
