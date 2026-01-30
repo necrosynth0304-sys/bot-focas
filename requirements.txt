@@ -1,3 +1,4 @@
 discord.py
-duckduckgo-search
+duckduckgo-search==6.1.0
 flask
+
