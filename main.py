@@ -15,7 +15,8 @@ HISTORICO_FILE = "historico_focas.json"
 TERMOS_FOFOS = [
     "Harp seal pup", "Pagophilus groenlandicus pup", "Weddell seal face",
     "Leptonychotes weddellii", "Saimaa ringed seal", "Pusa hispida saimensis",
-    "Baikal seal face", "Funny seal", "Baby seal rolling", "Spotted seal pup"
+    "Baikal seal face", "Funny seal", "Baby seal rolling", "Spotted seal pup",
+    "Seal waving", "Fat seal", "Cute seal"
 ]
 
 # --- LISTA NEGRA (Anti-Fóssil) ---
@@ -24,12 +25,13 @@ PALAVRAS_PROIBIDAS = [
     "map", "diagram", "drawing", "sketch", "art", "illustration", "anatomy"
 ]
 
-# --- BACKUP PREMIUM ---
+# --- BACKUP PREMIUM (Imagens HD Garantidas) ---
 BACKUP_FOCAS = [
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/6/63/Harp_seal_pup.jpg/1024px-Harp_seal_pup.jpg",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Weddell_Seal.jpg/1024px-Weddell_Seal.jpg",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/Grey_Seal_%28Halichoerus_grypus%29_2.jpg/1024px-Grey_Seal_%28Halichoerus_grypus%29_2.jpg",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Monachus_schauinslandi_midway_closeup.jpg/1024px-Monachus_schauinslandi_midway_closeup.jpg"
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/6/63/Harp_seal_pup.jpg/800px-Harp_seal_pup.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Weddell_Seal.jpg/800px-Weddell_Seal.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/Grey_Seal_%28Halichoerus_grypus%29_2.jpg/800px-Grey_Seal_%28Halichoerus_grypus%29_2.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Monachus_schauinslandi_midway_closeup.jpg/800px-Monachus_schauinslandi_midway_closeup.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Leopard_Seal_%28Hydrurga_leptonyx%29.jpg/800px-Leopard_Seal_%28Hydrurga_leptonyx%29.jpg"
 ]
 
 intents = discord.Intents.default()
@@ -61,13 +63,18 @@ async def buscar_foca_wikipedia():
     termo = random.choice(TERMOS_FOFOS)
     offset = random.randint(0, 15)
     
-    headers = {'User-Agent': 'FocaBotEducation/6.0'}
+    headers = {'User-Agent': 'FocaBotEducation/7.0'}
     
+    # MUDANÇA CRUCIAL AQUI: &iiurlwidth=800
+    # Isso pede para a Wiki entregar uma versão .JPG de 800px, perfeita para o Discord
     url = (
         f"https://commons.wikimedia.org/w/api.php?"
         f"action=query&generator=search&gsrsearch={termo} filetype:bitmap"
-        f"&gsrnamespace=6&gsrlimit=30&gsroffset={offset}&format=json&prop=imageinfo&iiprop=url"
+        f"&gsrnamespace=6&gsrlimit=30&gsroffset={offset}&format=json"
+        f"&prop=imageinfo&iiprop=url&iiurlwidth=800"
     )
+
+    print(f"Buscando: {termo} (Solicitando Thumbnail)")
 
     async with aiohttp.ClientSession() as session:
         try:
@@ -81,25 +88,24 @@ async def buscar_foca_wikipedia():
                 imagens_candidatas = []
                 
                 for pid in pages:
-                    if "imageinfo" in pages[pid]:
-                        url_img = pages[pid]["imageinfo"][0]["url"]
-                        if (url_img.lower().endswith(('.jpg', '.jpeg', '.png')) and 
-                            eh_imagem_segura(url_img) and 
-                            url_img not in links_usados):
-                                imagens_candidatas.append(url_img)
+                    info = pages[pid].get("imageinfo", [{}])[0]
+                    
+                    # Prioriza a 'thumburl' (versão leve) se existir, senão pega a 'url' original
+                    url_img = info.get("thumburl", info.get("url"))
+                    
+                    if url_img and eh_imagem_segura(url_img) and url_img not in links_usados:
+                        imagens_candidatas.append(url_img)
                 
                 if not imagens_candidatas: return None
                 return random.choice(imagens_candidatas)
-        except:
+        except Exception as e:
+            print(f"Erro: {e}")
             return None
 
-# --- CRIAÇÃO DO EMBED (A Moldura Mágica) ---
+# --- CRIAÇÃO DO EMBED ---
 def criar_embed(url_imagem):
-    # Cria uma caixa azul (cor 0x3498db)
     embed = discord.Embed(title="🦭 Aqui está sua foca!", color=0x3498db)
-    # Define a imagem dentro da caixa (força o carregamento)
     embed.set_image(url=url_imagem)
-    # Adiciona um rodapé charmoso
     embed.set_footer(text="Imagem gerada via Wikimedia Commons")
     return embed
 
@@ -121,15 +127,13 @@ class BotaoFocaView(View):
         if nova_imagem is None: nova_imagem = random.choice(BACKUP_FOCAS)
             
         salvar_historico(nova_imagem)
-        
-        # Cria o embed para a nova imagem também
         embed_novo = criar_embed(nova_imagem)
         
         await interaction.followup.send(embed=embed_novo, view=BotaoFocaView())
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} online com EMBEDS!')
+    print(f'Bot {bot.user} online com FIX DE IMAGEM!')
 
 @bot.command()
 async def foca(ctx):
@@ -140,8 +144,6 @@ async def foca(ctx):
         if imagem_url is None: imagem_url = random.choice(BACKUP_FOCAS)
 
         salvar_historico(imagem_url)
-        
-        # Aqui usamos o embed em vez de content
         embed_inicial = criar_embed(imagem_url)
         
         await ctx.send(embed=embed_inicial, view=BotaoFocaView())
