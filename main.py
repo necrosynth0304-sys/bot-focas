@@ -29,7 +29,7 @@ def carregar_historico():
 def salvar_historico(link):
     historico = carregar_historico()
     historico.append(link)
-    # Mantém o histórico limpo (últimas 500)
+    # Mantém o histórico com no máximo 500 links para não pesar
     if len(historico) > 500:
         historico.pop(0) 
     with open(HISTORICO_FILE, "w") as f:
@@ -37,25 +37,27 @@ def salvar_historico(link):
 
 async def buscar_foca_blindada():
     """
-    Usa o LoremFlickr para pegar imagens sem levar bloqueio.
+    Usa o LoremFlickr com tags científicas para evitar confusão.
     """
     links_usados = carregar_historico()
     
-    # Gera um número aleatório para "forçar" o site a dar uma imagem nova
-    seed = random.randint(1, 9999999)
+    # Gera um número aleatório para "quebrar o cache" e forçar imagem nova
+    seed = random.randint(1, 99999999)
     
-    # URL Mágica: Pede uma imagem de foca (seal) de 800x600 pixels
-    # O parametro ?lock= ajuda a variar a imagem
-    url_base = f"https://loremflickr.com/800/600/seal?lock={seed}"
+    # URL MELHORADA:
+    # harp+seal = Foca da Groenlândia
+    # phocidae = Nome científico da família das focas (garante que é animal)
+    # marine+mammal = Mamífero marinho
+    url_base = f"https://loremflickr.com/800/600/harp+seal,phocidae,marine+mammal?random={seed}"
 
     async with aiohttp.ClientSession() as session:
-        # allow_redirects=True é o segredo. O site redireciona para a foto real (jpg)
+        # allow_redirects=True segue o link até a imagem real (.jpg)
         async with session.get(url_base, allow_redirects=True) as resp:
             if resp.status == 200:
-                # Pegamos o link final da imagem (ex: flickr.com/foto123.jpg)
+                # O site redireciona para a URL final da imagem
                 url_final = str(resp.url)
                 
-                # Se por um acaso cair uma repetida, avisamos o bot
+                # Verificação de repetição
                 if url_final in links_usados:
                     return "REPETIDO"
                 
@@ -67,7 +69,7 @@ async def buscar_foca_blindada():
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} está online e pronto!')
+    print(f'Bot {bot.user} está online!')
 
 @bot.command()
 async def foca(ctx):
@@ -75,17 +77,18 @@ async def foca(ctx):
         # Tenta pegar a imagem
         imagem_url = await buscar_foca_blindada()
 
-        # Lógica de tentativa (se der repetido, tenta mais uma vez na hora)
+        # Se vier repetida, o bot tenta mais uma vez sozinho (segunda chance)
         if imagem_url == "REPETIDO":
             imagem_url = await buscar_foca_blindada()
         
+        # Se deu certo e não é repetida
         if imagem_url and imagem_url != "REPETIDO":
             await ctx.send(imagem_url)
             salvar_historico(imagem_url)
             print(f"Enviada: {imagem_url}")
         else:
-            await ctx.send("As focas estão tímidas... Tente novamente em alguns segundos!")
+            await ctx.send("A foca fugiu... Tente de novo!")
 
 # --- INICIALIZAÇÃO ---
-keep_alive.keep_alive()
-bot.run(TOKEN)
+keep_alive.keep_alive() # Mantém vivo na Koyeb
+bot.run(TOKEN) # Inicia o bot
