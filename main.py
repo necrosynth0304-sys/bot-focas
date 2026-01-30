@@ -40,84 +40,79 @@ async def buscar_foca_wikipedia():
     """
     links_usados = carregar_historico()
     
-    # Sorteia um "ponto de partida" aleatório nos resultados (0 a 500)
-    # Isso garante que cada vez pegamos uma foca diferente no meio das milhares que existem
-    offset = random.randint(0, 500)
+    # AJUSTE: Reduzi o offset para max 50 para garantir resultados
+    # A Wiki retorna 50 resultados por vez. O offset muda a pagina.
+    offset = random.randint(0, 50)
     
-    # URL da API da Wikipédia (Wikimedia Commons)
-    # gsrsearch=Phocidae|Pinniped -> Busca pela família das focas
-    # gsrnamespace=6 -> Apenas arquivos de mídia (imagens)
-    # prop=imageinfo&iiprop=url -> Queremos o link direto da imagem
+    # Termos de busca: "Phocidae" (Focas) OU "Grey seal" OU "Harbor seal"
+    # filetype:bitmap garante que vem imagem (jpg/png) e não PDF ou som
+    search_term = "Phocidae|Grey seal|Harbor seal|Elephant seal"
+    
     url = (
         f"https://commons.wikimedia.org/w/api.php?"
-        f"action=query&generator=search&gsrsearch=Phocidae|Pinniped filetype:bitmap"
-        f"&gsrnamespace=6&gsrlimit=5&gsroffset={offset}&format=json&prop=imageinfo&iiprop=url"
+        f"action=query&generator=search&gsrsearch={search_term} filetype:bitmap"
+        f"&gsrnamespace=6&gsrlimit=50&gsroffset={offset}&format=json&prop=imageinfo&iiprop=url"
     )
+
+    print(f"Buscando na Wiki com offset {offset}...")
 
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    print(f"Erro na API Wiki: {resp.status}")
                     return None
                 
                 data = await resp.json()
                 
-                # O JSON da wiki é meio complexo, precisamos navegar nele
                 if "query" not in data or "pages" not in data["query"]:
-                    print("Nenhuma foca encontrada nesse offset.")
+                    print("Wiki retornou vazio.")
                     return None
                 
                 pages = data["query"]["pages"]
-                
-                # Lista de possíveis imagens retornadas
                 imagens_candidatas = []
                 
                 for page_id in pages:
                     page = pages[page_id]
                     if "imageinfo" in page:
                         url_imagem = page["imageinfo"][0]["url"]
-                        # Filtra para garantir que é imagem comum (jpg, png)
-                        if url_imagem.endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                        # Filtra apenas formatos de imagem comuns
+                        if url_imagem.endswith(('.jpg', '.jpeg', '.png')):
                              imagens_candidatas.append(url_imagem)
                 
-                # Embaralha as candidatas
+                if not imagens_candidatas:
+                    return None
+
                 random.shuffle(imagens_candidatas)
                 
                 for img in imagens_candidatas:
                     if img not in links_usados:
                         return img
                         
-                return "REPETIDO"
+                # Se todas forem repetidas, retorna a primeira mesmo assim para não falhar
+                return imagens_candidatas[0]
                 
         except Exception as e:
-            print(f"Erro técnico: {e}")
+            print(f"Erro: {e}")
             return None
 
 # --- COMANDOS ---
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} está conectado na Wikipédia!')
+    print(f'Bot {bot.user} está ONLINE e ATUALIZADO (Wiki V2)!')
 
 @bot.command()
 async def foca(ctx):
+    # Avisa o Discord que estamos "digitando" (ajuda a saber se o bot travou)
     async with ctx.typing():
         imagem_url = await buscar_foca_wikipedia()
-
-        # Tentativa extra se der erro ou repetido
-        if imagem_url == "REPETIDO" or imagem_url is None:
-            print("Tentando segunda busca...")
-            imagem_url = await buscar_foca_wikipedia()
         
-        if imagem_url and imagem_url != "REPETIDO":
+        if imagem_url:
             await ctx.send(imagem_url)
             salvar_historico(imagem_url)
-            print(f"Enviada: {imagem_url}")
+            print(f"Sucesso: {imagem_url}")
         else:
-            # Se falhar mesmo assim, enviamos uma foca de emergência (link fixo)
-            await ctx.send("As focas selvagens estão escondidas... Aqui vai uma clássica:")
-            await ctx.send("https://upload.wikimedia.org/wikipedia/commons/2/25/Saimaa_Ringed_Seal_Phoca_hispida_saimensis.jpg")
+            await ctx.send("Não achei nenhuma foca nesse mergulho... Tente de novo rapidinho!")
 
 # --- INICIALIZAÇÃO ---
 keep_alive.keep_alive()
