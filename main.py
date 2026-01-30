@@ -10,6 +10,18 @@ import keep_alive
 TOKEN = os.environ['DISCORD_TOKEN']
 HISTORICO_FILE = "historico_focas.json"
 
+# --- LISTA DE EMERGÊNCIA (Caso a Wikipédia falhe) ---
+BACKUP_FOCAS = [
+    "https://upload.wikimedia.org/wikipedia/commons/2/25/Saimaa_Ringed_Seal_Phoca_hispida_saimensis.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Phoca_vitulina_at_hirtshals_oceanarium.jpg/800px-Phoca_vitulina_at_hirtshals_oceanarium.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Harbor_Seal_at_Monterey_Bay.jpg/800px-Harbor_Seal_at_Monterey_Bay.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/Phoca_largha_image.jpg/800px-Phoca_largha_image.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Pusa_hispida_ladogensis_-_Ladoga_Seal_-_Ladogaseehund.jpg/800px-Pusa_hispida_ladogensis_-_Ladoga_Seal_-_Ladogaseehund.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Pusa_sibirica_Baikal_seal_2.jpg/800px-Pusa_sibirica_Baikal_seal_2.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Weddell_Seal.jpg/800px-Weddell_Seal.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Monachus_schauinslandi_midway_closeup.jpg/800px-Monachus_schauinslandi_midway_closeup.jpg"
+]
+
 # Configuração dos Intents
 intents = discord.Intents.default()
 intents.message_content = True
@@ -36,36 +48,35 @@ def salvar_historico(link):
 
 async def buscar_foca_wikipedia():
     """
-    Busca imagens reais e científicas de focas no Wikimedia Commons.
+    Busca imagens na Wikipédia com identificação correta (User-Agent).
     """
     links_usados = carregar_historico()
     
-    # AJUSTE: Reduzi o offset para max 50 para garantir resultados
-    # A Wiki retorna 50 resultados por vez. O offset muda a pagina.
-    offset = random.randint(0, 50)
+    # Offset menor para garantir resultados (páginas 0 a 10)
+    offset = random.randint(0, 10)
     
-    # Termos de busca: "Phocidae" (Focas) OU "Grey seal" OU "Harbor seal"
-    # filetype:bitmap garante que vem imagem (jpg/png) e não PDF ou som
-    search_term = "Phocidae|Grey seal|Harbor seal|Elephant seal"
+    # Cabeçalho OBRIGATÓRIO da Wikipédia
+    headers = {
+        'User-Agent': 'FocaBotEducation/1.0 (bot_estudante_python; contato@exemplo.com)'
+    }
     
+    # Termo de busca: Phocidae (família das focas)
     url = (
         f"https://commons.wikimedia.org/w/api.php?"
-        f"action=query&generator=search&gsrsearch={search_term} filetype:bitmap"
+        f"action=query&generator=search&gsrsearch=Phocidae filetype:bitmap"
         f"&gsrnamespace=6&gsrlimit=50&gsroffset={offset}&format=json&prop=imageinfo&iiprop=url"
     )
 
-    print(f"Buscando na Wiki com offset {offset}...")
-
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url) as resp:
+            async with session.get(url, headers=headers) as resp: # Adicionei o header aqui
                 if resp.status != 200:
+                    print(f"Erro Wiki: {resp.status}")
                     return None
                 
                 data = await resp.json()
                 
                 if "query" not in data or "pages" not in data["query"]:
-                    print("Wiki retornou vazio.")
                     return None
                 
                 pages = data["query"]["pages"]
@@ -75,7 +86,6 @@ async def buscar_foca_wikipedia():
                     page = pages[page_id]
                     if "imageinfo" in page:
                         url_imagem = page["imageinfo"][0]["url"]
-                        # Filtra apenas formatos de imagem comuns
                         if url_imagem.endswith(('.jpg', '.jpeg', '.png')):
                              imagens_candidatas.append(url_imagem)
                 
@@ -88,7 +98,6 @@ async def buscar_foca_wikipedia():
                     if img not in links_usados:
                         return img
                         
-                # Se todas forem repetidas, retorna a primeira mesmo assim para não falhar
                 return imagens_candidatas[0]
                 
         except Exception as e:
@@ -99,20 +108,23 @@ async def buscar_foca_wikipedia():
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} está ONLINE e ATUALIZADO (Wiki V2)!')
+    print(f'Bot {bot.user} está online e identificado!')
 
 @bot.command()
 async def foca(ctx):
-    # Avisa o Discord que estamos "digitando" (ajuda a saber se o bot travou)
     async with ctx.typing():
+        # 1. Tenta buscar na Wikipédia
         imagem_url = await buscar_foca_wikipedia()
         
-        if imagem_url:
-            await ctx.send(imagem_url)
-            salvar_historico(imagem_url)
-            print(f"Sucesso: {imagem_url}")
-        else:
-            await ctx.send("Não achei nenhuma foca nesse mergulho... Tente de novo rapidinho!")
+        # 2. Se a Wiki falhar, usa o Backup
+        if imagem_url is None:
+            print("Wiki falhou, usando backup...")
+            imagem_url = random.choice(BACKUP_FOCAS)
+
+        # 3. Envia
+        await ctx.send(imagem_url)
+        salvar_historico(imagem_url)
+        print(f"Enviada: {imagem_url}")
 
 # --- INICIALIZAÇÃO ---
 keep_alive.keep_alive()
