@@ -4,27 +4,31 @@ import aiohttp
 import json
 import random
 import os
-import keep_alive
-import os
+import keep_alive # Importa o nosso sistema anti-sono
 
 # --- CONFIGURAÇÃO ---
+# Pega o Token direto das configurações da Koyeb (Segurança máxima)
 TOKEN = os.environ['DISCORD_TOKEN']
+
 HISTORICO_FILE = "historico_focas.json"
 SUBREDDIT_URL = "https://www.reddit.com/r/seals/hot.json?limit=100"
 
-# Configuração dos Intents (Permissões do Bot)
+# Configuração dos Intents
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- FUNÇÕES DE LÓGICA (O Cérebro) ---
+# --- FUNÇÕES DE LÓGICA ---
 
 def carregar_historico():
     """Lê o arquivo de histórico para saber quais imagens já foram usadas."""
     if not os.path.exists(HISTORICO_FILE):
         return []
     with open(HISTORICO_FILE, "r") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return [] # Se o arquivo estiver corrompido, retorna lista vazia
 
 def salvar_historico(link):
     """Adiciona um novo link ao histórico e salva no arquivo."""
@@ -35,65 +39,71 @@ def salvar_historico(link):
 
 async def pegar_foca_da_internet():
     """
-    Vai até o Reddit, pega 100 posts e tenta achar um que não esteja no histórico.
+    Vai até o Reddit fingindo ser um navegador Chrome e pega imagens.
     """
-    # 1. Carrega a memória do bot
     links_usados = carregar_historico()
     
-    # User-Agent é como o bot se apresenta para o site (importante para não ser bloqueado)
-    headers = {'User-Agent': 'FocaBot/1.0 (by seunome)'}
+    # --- A MÁGICA DA CAMUFLAGEM ---
+    # Esse cabeçalho faz o Reddit achar que somos um usuário normal no Chrome
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
 
     async with aiohttp.ClientSession() as session:
         async with session.get(SUBREDDIT_URL, headers=headers) as resp:
+            # Se der erro (ex: 429 ou 403), avisa no log
             if resp.status != 200:
-                return None # Erro ao acessar a internet
+                print(f"Erro ao acessar Reddit: Código {resp.status}")
+                return None
 
-            data = await resp.json()
-            posts = data['data']['children']
+            try:
+                data = await resp.json()
+                posts = data['data']['children']
+            except:
+                print("Erro ao ler o JSON do Reddit")
+                return None
 
-            # Filtra apenas o que é imagem (jpg, png, gif)
+            # Filtra apenas o que é imagem
             imagens_candidatas = []
             for post in posts:
-                url = post['data']['url']
+                # O .get previne erros se o post não tiver url
+                url = post['data'].get('url', '')
                 if url.endswith(('.jpg', '.png', '.gif', '.jpeg')):
                     imagens_candidatas.append(url)
 
-            # --- A LÓGICA DO "NUNCA REPETIR" ---
-            random.shuffle(imagens_candidatas) # Embaralha as cartas
+            # --- LÓGICA DO "NUNCA REPETIR" ---
+            random.shuffle(imagens_candidatas) 
             
             for imagem in imagens_candidatas:
                 if imagem not in links_usados:
                     # ACHAMOS! É uma imagem nova.
                     return imagem
             
-            # Se o loop acabar e não achar nada, todas as 100 já foram usadas.
+            # Se acabar o loop e não achar nada
             return "ESGOTADO"
 
-# --- COMANDO DO BOT ---
+# --- COMANDOS DO BOT ---
 
 @bot.event
 async def on_ready():
-    print(f'Bot {bot.user} está online e pronto para distribuir focas!')
+    print(f'Bot {bot.user} está online e camuflado!')
 
 @bot.command()
 async def foca(ctx):
-    # Avisa que está pensando (opcional, mas bom para UX)
     async with ctx.typing():
         imagem_url = await pegar_foca_da_internet()
 
         if imagem_url is None:
-            await ctx.send("Minhas conexões com o oceano falharam... Tente de novo.")
+            await ctx.send("Minhas conexões com o oceano falharam... (Erro de acesso ao Reddit)")
         
         elif imagem_url == "ESGOTADO":
-            # Aqui você poderia limpar o histórico ou buscar de outro subreddit
-            await ctx.send("Caramba! Você já viu TODAS as focas recentes. Espere novas postagens!")
+            await ctx.send("Caramba! Você já viu TODAS as focas recentes. Espere novas postagens no Reddit!")
         
         else:
-            # Envia a foca e salva na memória
             await ctx.send(imagem_url)
             salvar_historico(imagem_url)
-            print(f"Imagem enviada e salva: {imagem_url}")
+            print(f"Foca enviada: {imagem_url}")
 
-keep_alive.keep_alive() # Inicia o servidor web
-bot.run(TOKEN) # Inicia o bot
-
+# --- INICIALIZAÇÃO ---
+keep_alive.keep_alive() # Mantém o bot acordado na Koyeb
+bot.run(TOKEN) # Liga o bot
